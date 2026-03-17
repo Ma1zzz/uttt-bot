@@ -5,9 +5,15 @@ const Node = board.Node;
 
 const Piece = enum(i32) { DOT = -1, EMPTY = 0, CROSS = 1 };
 
+const StdVector = extern struct {
+    ptr: [*]u8,
+    size: usize,
+    capacity: usize,
+};
+
 const RawBoardstate = extern struct {
-    board: [9][9]Piece,
-    turn: Piece,
+    board: StdVector, // outer vector
+    turn: i32,
     current: i16,
 };
 
@@ -16,62 +22,103 @@ const Move = extern struct {
     spot: i32,
 };
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-
-const backing_allocator = gpa.allocator();
-var arena = std.heap.ArenaAllocator.init(backing_allocator);
-const allocator = arena.allocator();
-
 var is_first_time: bool = true;
-var root_node: Node = {};
 
-var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.milliTimestamp())));
-const rand = prng.random();
+export fn libmcts_bot(boardstate: *const RawBoardstate, _: *i32) Move {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-export fn MaxBot(boardstate: RawBoardstate, _: *i32) Move {
-    if (is_first_time) {
-        var idx: usize = 0;
-        for (boardstate.board) |row| {
-            for (row) |cell| {
-                if (cell != .EMPTY) {
-                    return idx;
-                }
-                idx += 1;
-            }
-        }
-        root_node.parrent_node = null;
-        root_node.move = idx;
-        is_first_time = false;
+    const backing_allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var root_node: Node = .{
+        .parrent_node = null,
+        .pices = .{board.Cell.EMPTY} ** 81,
+        .is_boot_node = false,
+        .nodes_under = &.{},
+    };
+
+    root_node.pices = rawToBoard(boardstate);
+
+    if (boardstate.turn == 1) {
+        mcts.bot_piece = board.Cell.CROSS;
+        mcts.opponent_piece = board.Cell.DOT;
+    } else if (boardstate.turn == -1) {
+        mcts.bot_piece = board.Cell.DOT;
+        mcts.opponent_piece = board.Cell.CROSS;
     }
 
-    const other_move = getOpponentMove(root_node.pices, &RawBoardstate);
+    std.debug.print("__{}__\n", .{boardstate.turn});
+
+    var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.milliTimestamp())));
+    const rand = prng.random();
+
+    const start = std.time.milliTimestamp();
+    while (std.time.milliTimestamp() - start < 9000) {
+        mcts.selection(&root_node, allocator, rand, boardstate.current) catch {
+            std.debug.print("yeah YORE fucked bitch", .{});
+            unreachable;
+        };
+    }
+
+    std.debug.print("TOTAL LITS {}\n", .{root_node.visits});
 
     for (root_node.nodes_under) |value| {
-        if (value.?.move != other_move) continue;
-        root_node = root_node.nodes_under;
+        std.debug.print("move : {}\n", .{value.?.move});
     }
 
-    var x: usize = 0;
-    while (x < 1000000) : (x += 1) {
-        mcts.selection(root_node, allocator, rand);
+    for (root_node.nodes_under) |value| {
+        std.debug.print(
+            "Nodes move {} had {} visits and {} points\n thats a winrate of {}\n",
+            .{ value.?.move, value.?.visits, value.?.points, @as(f32, @floatFromInt(value.?.points)) /
+                @as(f32, @floatFromInt(value.?.visits)) },
+        );
     }
 
-    const best: u8 = mcts.pickStep(&root_node);
-    return Move{
-        .sub = @intCast(best / 9),
-        .spot = @intCast(best % 9),
+    const best_child_index: u8 = mcts.pickStep(&root_node);
+    const best = root_node.nodes_under[best_child_index].?.move;
+
+    var best_sub: i32 = 0;
+    var move: i32 = 0;
+    for (board.sub_boards, 0..) |sub_boards, y| {
+        for (sub_boards, 0..) |value, z| {
+            if (value == best) {
+                best_sub = @intCast(y);
+                move = @intCast(z);
+            }
+        }
+    }
+
+    return .{
+        .sub = best_sub,
+        .spot = move,
     };
 }
 
-fn getOpponentMove(our_pieces: [81]board.Cell, raw: *const RawBoardstate) u8 {
-    for (0..81) |i| {
-        const row = i / 9;
-        const col = i % 9;
-        const raw_cell = raw.board[row][col];
-        // convert raw_cell to your Cell type and compare
-        if (our_pieces[i] == .EMPTY and raw_cell != .EMPTY) {
-            return @intCast(i);
+fn getRawCell(raw: *const RawBoardstate, row: usize, col: usize) i32 {
+    const inner_vectors = @as([*]StdVector, @ptrCast(@alignCast(raw.board.ptr)));
+    const row_vec = inner_vectors[row];
+    const pieces = @as([*]i32, @ptrCast(@alignCast(row_vec.ptr)));
+    return pieces[col];
+}
+
+fn rawToBoard(raw: *const RawBoardstate) [81]board.Cell {
+    var pices = [_]board.Cell{board.Cell.EMPTY} ** 81;
+    for (0..9) |sub| {
+        for (0..9) |cell| {
+            const board_row = sub / 3;
+            const board_col = sub % 3;
+            const cell_row = cell / 3;
+            const cell_col = cell % 3;
+            const flat: u8 = @intCast((board_row * 3 + cell_row) * 9 + (board_col * 3 + cell_col));
+            pices[flat] = switch (getRawCell(raw, sub, cell)) {
+                1 => board.Cell.CROSS,
+                -1 => board.Cell.DOT,
+                else => board.Cell.EMPTY,
+            };
         }
     }
-    unreachable; // should always find a difference
+    return pices;
 }
