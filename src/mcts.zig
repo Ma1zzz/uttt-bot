@@ -6,52 +6,65 @@ pub var bot_piece: board.Cell = undefined;
 pub var opponent_piece: board.Cell = undefined;
 
 pub fn selection(root_node: *Node, allocator: std.mem.Allocator, rand: std.Random, current: i16) !void {
-    try createNewNodes(allocator, root_node, current);
-
-    var ucb1Val: [81]f64 = .{0} ** 81;
-
-    const legal_moves = board.getLegalMoves(&root_node.pices, current);
-    const legal_moves_amount = legal_moves[81];
-
-    for (0..legal_moves_amount) |x| {
-        ucb1Val[x] = ucb1(
-            root_node.nodes_under[x].?.points,
-            root_node.nodes_under[x].?.visits,
-            root_node.visits,
-        );
-        // std.debug.print("node points {} nodes visits {}\n", .{ root_node.nodes_under[x].?.points, root_node.nodes_under[x].?.visits });
-        // std.debug.print("UCB1 value : {}\n", .{ucb1Val[x]});
-    }
+    var current_root_node = root_node;
+    var current_current = current;
 
     var best_index: usize = 99;
     var max_ucb: f64 = -999999;
+    var ucb1Val: [81]f64 = .{0} ** 81;
+    while (true) {
+        try createNewNodes(allocator, current_root_node, current_current);
 
-    for (0..legal_moves_amount) |value| {
-        if (ucb1Val[value] >= max_ucb) {
-            max_ucb = ucb1Val[value];
-            best_index = value;
+        ucb1Val = .{0} ** 81;
+
+        // const legal_moves = board.getLegalMoves(&current_root_node.pices, current_current);
+        // const legal_moves_amount = legal_moves[81];
+
+        for (0..current_root_node.nodes_under.len) |x| {
+            ucb1Val[x] = ucb1(
+                current_root_node.nodes_under[x].?.points,
+                current_root_node.nodes_under[x].?.visits,
+                current_root_node.visits,
+            );
+            // std.debug.print("node points {} nodes visits {}\n", .{ root_node.nodes_under[x].?.points, root_node.nodes_under[x].?.visits });
+            // std.debug.print("UCB1 value : {}\n", .{ucb1Val[x]});
         }
+
+        best_index = 99;
+        max_ucb = -999999;
+
+        for (0..current_root_node.nodes_under.len) |value| {
+            if (ucb1Val[value] >= max_ucb) {
+                max_ucb = ucb1Val[value];
+                best_index = value;
+            }
+        }
+
+        //std.debug.print("index : {}\n", .{best_index});
+
+        if (board.checkState(&current_root_node.pices) != board.STILL_GOING) {
+            const current_score = board.checkState(&current_root_node.pices);
+            backMove(current_root_node, current_score);
+            return;
+        }
+
+        if (best_index == 99) unreachable;
+        const node = current_root_node.nodes_under[best_index].?;
+        const next_current: i16 = @intCast(board.NEXT_SUBBOARD[node.move]);
+        if (node.visits != 0) { //return selection(root_node.nodes_under[best_index].?, allocator, rand, next_current);
+
+            current_root_node = current_root_node.nodes_under[best_index].?;
+            current_current = next_current;
+            continue;
+        }
+        if (node.visits == 0) {
+            simulate(node, rand, next_current);
+            return;
+        }
+
+        std.debug.print("__NO FUCKED UP ____\n", .{});
+        unreachable;
     }
-
-    //std.debug.print("index : {}\n", .{best_index});
-
-    if (board.checkState(&root_node.pices) != board.STILL_GOING) {
-        const current_score = board.checkState(&root_node.pices);
-        backMove(root_node, current_score);
-        return;
-    }
-
-    if (best_index == 99) unreachable;
-    const node = root_node.nodes_under[best_index].?;
-    const next_current: i16 = @intCast(board.NEXT_SUBBOARD[node.move]);
-    if (node.visits != 0) return selection(root_node.nodes_under[best_index].?, allocator, rand, next_current);
-    if (node.visits == 0) {
-        simulate(node, rand, next_current);
-        return;
-    }
-
-    std.debug.print("__NO FUCKED UP ____\n", .{});
-    unreachable;
 }
 
 fn simulate(start_node: *Node, rand: std.Random, current: i16) void {
@@ -67,14 +80,17 @@ fn playOut(current_board: [81]board.Cell, is_bot_turn: bool, rand: std.Random, c
 
     var is_bot = is_bot_turn;
 
-    while (board.checkState(&new_board) == board.STILL_GOING) {
+    while (true) {
         const legal_moves =
             board.getLegalMoves(&new_board, next_current);
         const legal_moves_amount = legal_moves[81];
 
+        if (legal_moves_amount == 0) break;
+
         const value = rand.intRangeLessThan(usize, 0, legal_moves_amount);
         const move = legal_moves[value];
 
+        // use good moves if any exist, otherwise fall back to random
         //var new_board = current_board;
 
         if (is_bot) {
@@ -140,7 +156,7 @@ pub fn createNewNodes(allocator: std.mem.Allocator, root_node: *Node, current: i
 fn ucb1(points: i32, visits: i32, total_visits: i32) f64 {
     if (visits == 0) return std.math.inf(f64);
     const avg = @as(f64, @floatFromInt(points)) / @as(f64, @floatFromInt(visits));
-    const exploration = 3 * @sqrt(@log(@as(f64, @floatFromInt(total_visits))) / @as(f64, @floatFromInt(visits))); // højre c højre udforsk
+    const exploration = 1.41 * @sqrt(@log(@as(f64, @floatFromInt(total_visits))) / @as(f64, @floatFromInt(visits))); // højre c højre udforsk
     return avg + exploration;
 }
 pub fn pickStep(current_node: *Node) u8 {
@@ -153,7 +169,7 @@ pub fn pickStep(current_node: *Node) u8 {
         }
     }
     //std.debug.print("move : {} :\n", .{current_node.nodes_under[index].?.move});
-    return index; //current_node.nodes_under[index].?.move;
+    return index;
 }
 
 fn getMoveFromBoards(old: [81]board.Cell, new: [81]board.Cell) u8 {

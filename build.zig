@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    lib.linkLibC();
+    lib.linkSystemLibrary("pthread");
     b.installArtifact(lib);
 
     // const exe = b.addExecutable(.{
