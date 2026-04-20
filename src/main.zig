@@ -227,6 +227,7 @@ fn createRandomBoard(dataList: *DataList(Data)) void {
         data.turn = @intCast(boardstate.turn);
 
         dataList.append(data) catch unreachable;
+        std.debug.print("__DONE__\n", .{});
     }
     //return data;
 }
@@ -284,7 +285,6 @@ fn createRandomBoardHelper(root_node: *board.Node, is_bot_turn: bool, state: *Ra
 
 fn createDataSet() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    //const allocator = gpa.allocator();
 
     var dataList = DataList(Data).init(gpa.allocator());
     defer dataList.deinit();
@@ -301,7 +301,6 @@ fn createDataSet() !void {
     }
 
     const cwd = std.fs.cwd();
-
     var file = cwd.openFile("data.csv", .{
         .mode = .read_write,
     }) catch |err| switch (err) {
@@ -313,25 +312,67 @@ fn createDataSet() !void {
     };
     defer file.close();
 
-    const stat = try file.stat();
     try file.seekFromEnd(0);
+    const stat = try file.stat();
 
-    var buffer: [1024]u8 = undefined;
+    var buffer: [8192]u8 = undefined;
     var file_writer = file.writer(&buffer);
     const writer = &file_writer.interface;
+
     if (stat.size == 0) {
         try writer.writeAll("pices,sub_board,turn,est\n");
     }
 
     std.debug.print("-----start-----\n", .{});
+
+    const flush_interval = 20;
+    var write_count: usize = 0;
+
     while (true) {
-        // const data = createRandomBoard();
         const data = dataList.next();
         if (data == null) unreachable;
-        try writer.print("{any},{d},{d},{d}\n", .{ data.?.pices, data.?.sub_board, data.?.turn, data.?.estimate });
-        try writer.flush();
-        std.debug.print("______nezt_____\n", .{});
+
+        for (data.?.pices) |value| {
+            try writer.print("{d}", .{value});
+        }
+        try writer.print("{d},{d},{d}\n", .{ data.?.sub_board, data.?.turn, data.?.estimate });
+
+        write_count += 1;
+        if (write_count % flush_interval == 0) {
+            try writer.flush();
+            std.debug.print("______wrote {d} records to disk TOTAL_____\n", .{write_count});
+        }
     }
+
+    // var file = cwd.openFile("data.csv", .{
+    //     .mode = .read_write,
+    // }) catch |err| switch (err) {
+    //     error.FileNotFound => try cwd.createFile("data.csv", .{
+    //         .read = true,
+    //         .truncate = false,
+    //     }),
+    //     else => return err,
+    // };
+    // defer file.close();
+    //
+    // const stat = try file.stat();
+    // try file.seekFromEnd(0);
+    //
+    // var buffer: [1024]u8 = undefined;
+    // var file_writer = file.writer(&buffer);
+    // const writer = &file_writer.interface;
+    // if (stat.size == 0) {
+    //     try writer.writeAll("pices,sub_board,turn,est\n");
+    // }
+    //
+    // std.debug.print("-----start-----\n", .{});
+    // while (true) {
+    //     const data = dataList.next();
+    //     if (data == null) unreachable;
+    //     try writer.print("{any},{d},{d},{d}\n", .{ data.?.pices, data.?.sub_board, data.?.turn, data.?.estimate });
+    //     try writer.flush();
+    //     std.debug.print("______wrote to disk_____\n", .{});
+    // }
 }
 
 pub fn main() !void {
