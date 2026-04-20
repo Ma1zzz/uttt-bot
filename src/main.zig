@@ -24,7 +24,7 @@ const Move = extern struct {
 
 var is_first_time: bool = true;
 
-const threads_amount: usize = 1;
+const threads_amount: usize = 7; // with main thread :]]
 
 export fn libmcts_bot(boardstate: *const RawBoardstate, _: *i32) Move {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -176,56 +176,59 @@ fn rawToBoard(raw: *const RawBoardstate) [81]board.Cell {
     return pices;
 }
 
-fn createRandomBoard() Data {
-    var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.milliTimestamp())));
-    const random = prng.random();
+fn createRandomBoard(dataList: *DataList(Data)) void {
+    while (true) {
+        var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.milliTimestamp())));
+        const random = prng.random();
 
-    const start_turn: i16 = if (random.boolean()) 1 else -1;
-    var boardstate: RawBoardstate = .{ .current = 0, .board = undefined, .turn = start_turn };
+        const start_turn: i16 = if (random.boolean()) 1 else -1;
+        var boardstate: RawBoardstate = .{ .current = 0, .board = undefined, .turn = start_turn };
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
 
-    const backing_allocator = gpa.allocator();
-    var arena = std.heap.ArenaAllocator.init(backing_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+        const backing_allocator = gpa.allocator();
+        var arena = std.heap.ArenaAllocator.init(backing_allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
 
-    //var root_node: board.Node = .{};
+        //var root_node: board.Node = .{};
 
-    var root_node: board.Node = .{
-        .parrent_node = null,
-        //.pices = rawToBoard(&boardstate),
-        .is_boot_node = false,
-        .nodes_under = &.{},
-    };
+        var root_node: board.Node = .{
+            .parrent_node = null,
+            //.pices = rawToBoard(&boardstate),
+            .is_boot_node = false,
+            .nodes_under = &.{},
+        };
 
-    if (boardstate.turn == 1) {
-        mcts.bot_piece = board.Cell.CROSS;
-        mcts.opponent_piece = board.Cell.DOT;
-    } else if (boardstate.turn == -1) {
-        mcts.bot_piece = board.Cell.DOT;
-        mcts.opponent_piece = board.Cell.CROSS;
+        if (boardstate.turn == 1) {
+            mcts.bot_piece = board.Cell.CROSS;
+            mcts.opponent_piece = board.Cell.DOT;
+        } else if (boardstate.turn == -1) {
+            mcts.bot_piece = board.Cell.DOT;
+            mcts.opponent_piece = board.Cell.CROSS;
+        }
+
+        while (!createRandomBoardHelper(
+            &root_node,
+            root_node.is_boot_node,
+            &boardstate,
+        )) {}
+
+        sim(&root_node, boardstate, allocator);
+
+        const estimate = @as(f32, @floatFromInt(root_node.points)) /
+            @as(f32, @floatFromInt(root_node.visits));
+        var data: Data = .{};
+
+        data.pices = convert(root_node.pices);
+        data.estimate = estimate;
+        data.sub_board = boardstate.current;
+        data.turn = @intCast(boardstate.turn);
+
+        dataList.append(data) catch unreachable;
     }
-
-    while (!createRandomBoardHelper(
-        &root_node,
-        root_node.is_boot_node,
-        &boardstate,
-    )) {}
-
-    sim(&root_node, boardstate, allocator);
-
-    const estimate = @as(f32, @floatFromInt(root_node.points)) /
-        @as(f32, @floatFromInt(root_node.visits));
-    var data: Data = .{};
-
-    data.pices = convert(root_node.pices);
-    data.estimate = estimate;
-    data.sub_board = boardstate.current;
-    data.turn = @intCast(boardstate.turn);
-
-    return data;
+    //return data;
 }
 
 fn convert(pice: [81]board.Cell) [81]i2 {
@@ -280,7 +283,22 @@ fn createRandomBoardHelper(root_node: *board.Node, is_bot_turn: bool, state: *Ra
 }
 
 fn createDataSet() !void {
-    //const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    //const allocator = gpa.allocator();
+
+    var dataList = DataList(Data).init(gpa.allocator());
+    defer dataList.deinit();
+
+    var pool: std.Thread.Pool = undefined;
+    pool.init(.{ .allocator = gpa.allocator(), .n_jobs = threads_amount - 1 }) catch unreachable;
+    defer pool.deinit();
+
+    var wg: std.Thread.WaitGroup = .{};
+    var x: usize = 0;
+    while (x < threads_amount - 1) : (x += 1) {
+        pool.spawnWg(&wg, createRandomBoard, .{&dataList});
+        std.debug.print("0\n", .{});
+    }
 
     const cwd = std.fs.cwd();
 
@@ -307,13 +325,54 @@ fn createDataSet() !void {
 
     std.debug.print("-----start-----\n", .{});
     while (true) {
-        const data = createRandomBoard();
-        try writer.print("{any},{d},{d},{d}\n", .{ data.pices, data.sub_board, data.turn, data.estimate });
+        // const data = createRandomBoard();
+        const data = dataList.next();
+        if (data == null) unreachable;
+        try writer.print("{any},{d},{d},{d}\n", .{ data.?.pices, data.?.sub_board, data.?.turn, data.?.estimate });
         try writer.flush();
-        std.debug.print("______nezt_____", .{});
+        std.debug.print("______nezt_____\n", .{});
     }
 }
 
 pub fn main() !void {
     try createDataSet();
+}
+
+fn DataList(comptime T: type) type {
+    return struct {
+        list: std.ArrayList(T),
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
+        allocator: std.mem.Allocator,
+        read_index: usize = 0,
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            return .{ .list = std.ArrayList(T).empty, .allocator = allocator };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.list.deinit(self.allocator);
+        }
+
+        pub fn append(self: *@This(), value: T) !void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            try self.list.append(self.allocator, value);
+            defer self.cond.signal();
+        }
+
+        pub fn next(self: *@This()) ?T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            while (self.read_index >= self.list.items.len) {
+                self.cond.wait(&self.mutex);
+            }
+
+            const value = self.list.items[self.read_index];
+            self.read_index += 1;
+            return value;
+        }
+    };
 }
