@@ -17,17 +17,12 @@ pub fn selection(root_node: *Node, allocator: std.mem.Allocator, rand: std.Rando
 
         ucb1Val = .{0} ** 81;
 
-        // const legal_moves = board.getLegalMoves(&current_root_node.pices, current_current);
-        // const legal_moves_amount = legal_moves[81];
-
         for (0..current_root_node.nodes_under.len) |x| {
             ucb1Val[x] = ucb1(
                 current_root_node.nodes_under[x].?.points,
                 current_root_node.nodes_under[x].?.visits,
                 current_root_node.visits,
             );
-            // std.debug.print("node points {} nodes visits {}\n", .{ root_node.nodes_under[x].?.points, root_node.nodes_under[x].?.visits });
-            // std.debug.print("UCB1 value : {}\n", .{ucb1Val[x]});
         }
 
         best_index = 99;
@@ -89,9 +84,6 @@ fn playOut(current_board: [81]board.Cell, is_bot_turn: bool, rand: std.Random, c
 
         const value = rand.intRangeLessThan(usize, 0, legal_moves_amount);
         const move = legal_moves[value];
-
-        // use good moves if any exist, otherwise fall back to random
-        //var new_board = current_board;
 
         if (is_bot) {
             new_board[move] = bot_piece;
