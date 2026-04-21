@@ -114,6 +114,8 @@ pub inline fn getLegalMoves(current_board: *const [81]Cell, current: i16) [82]u8
     var legal_moves: [82]u8 = undefined;
     var legal_move_index: u8 = 0;
 
+    // if (current == -1) std.debug.print("happens", .{});
+
     if (current != -1) {
         const sub: usize = @intCast(current);
         if (checkSubBoard(current_board, sub) == STILL_GOING) {
@@ -127,6 +129,14 @@ pub inline fn getLegalMoves(current_board: *const [81]Cell, current: i16) [82]u8
             return legal_moves;
         }
     }
+
+    // if (current != -1) {
+    //     std.debug.print("shoud never see", .{});
+    //     unreachable;
+    // }
+
+    // std.debug.print("shoud not only print this", .{});
+    // std.debug.print("{}\n", .{current});
 
     var sub_results: [9]i8 = undefined;
     for (0..9) |x| sub_results[x] = checkSubBoard(current_board, x);

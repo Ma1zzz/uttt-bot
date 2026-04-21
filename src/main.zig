@@ -24,7 +24,7 @@ const Move = extern struct {
 
 var is_first_time: bool = true;
 
-const threads_amount: usize = 7; // with main thread :]]
+const threads_amount: usize = 8; // with main thread :]]
 
 export fn libmcts_bot(boardstate: *const RawBoardstate, _: *i32) Move {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -227,7 +227,7 @@ fn createRandomBoard(dataList: *DataList(Data)) void {
         data.turn = @intCast(boardstate.turn);
 
         dataList.append(data) catch unreachable;
-        std.debug.print("__DONE__\n", .{});
+        //std.debug.print("__DONE__\n", .{});
     }
     //return data;
 }
@@ -246,9 +246,6 @@ fn createRandomBoardHelper(root_node: *board.Node, is_bot_turn: bool, state: *Ra
 {
     var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.milliTimestamp())));
     const rand = prng.random();
-
-    // var prng = std.rand.DefaultPrng.init(0);
-    // const random = prng.random();
     const randomMoves = rand.intRangeAtMost(u8, 1, 70);
 
     var new_board = root_node.pices;
@@ -261,6 +258,8 @@ fn createRandomBoardHelper(root_node: *board.Node, is_bot_turn: bool, state: *Ra
         const legal_moves =
             board.getLegalMoves(&new_board, next_current);
         const legal_moves_amount = legal_moves[81];
+
+        //if (next_current == -1) std.debug.print("HAPPEND\n", .{});
 
         if (legal_moves_amount == 0) return false;
 
@@ -275,11 +274,16 @@ fn createRandomBoardHelper(root_node: *board.Node, is_bot_turn: bool, state: *Ra
 
         is_bot = !is_bot;
         next_current = @intCast(board.NEXT_SUBBOARD[move]);
+
+        if (board.checkSubBoard(&new_board, @intCast(next_current)) != 2) {
+            next_current = -1;
+        }
     }
 
     root_node.pices = new_board;
     state.current = next_current;
     if (is_bot != is_bot_turn) state.turn = @intFromBool(is_bot);
+    //if (state.current == -1) std.debug.print("current _{}_", .{state.current});
     return true;
 }
 
@@ -296,36 +300,41 @@ fn createDataSet() !void {
     var wg: std.Thread.WaitGroup = .{};
     var x: usize = 0;
     while (x < threads_amount - 1) : (x += 1) {
+        std.Thread.sleep(200 * std.time.ns_per_ms); // or my random vals get fucked
         pool.spawnWg(&wg, createRandomBoard, .{&dataList});
         std.debug.print("0\n", .{});
     }
 
+    //pool.waitAndWork(&wg);
     const cwd = std.fs.cwd();
     var file = cwd.openFile("data.csv", .{
         .mode = .read_write,
     }) catch |err| switch (err) {
         error.FileNotFound => try cwd.createFile("data.csv", .{
             .read = true,
-            .truncate = false,
+            .truncate = true,
         }),
         else => return err,
     };
     defer file.close();
 
-    try file.seekFromEnd(0);
     const stat = try file.stat();
+
+    //try file.seekTo(stat.size);
 
     var buffer: [8192]u8 = undefined;
     var file_writer = file.writer(&buffer);
     const writer = &file_writer.interface;
 
+    try file_writer.seekTo(stat.size);
+
     if (stat.size == 0) {
-        try writer.writeAll("pices,sub_board,turn,est\n");
+        try writer.writeAll("player1,player2,sub_board,turn,est\n");
     }
 
     std.debug.print("-----start-----\n", .{});
 
-    const flush_interval = 20;
+    const flush_interval = 5;
     var write_count: usize = 0;
 
     while (true) {
@@ -333,9 +342,37 @@ fn createDataSet() !void {
         if (data == null) unreachable;
 
         for (data.?.pices) |value| {
-            try writer.print("{d}", .{value});
+            var y: i32 = value;
+            if (value == -1) y = 0;
+            try writer.print("{d}", .{y});
         }
-        try writer.print("{d},{d},{d}\n", .{ data.?.sub_board, data.?.turn, data.?.estimate });
+
+        try writer.print(",", .{});
+
+        for (data.?.pices) |value| {
+            var y: i32 = value;
+            if (value == 1) y = 0;
+
+            if (value == -1) y = 1;
+            try writer.print("{d}", .{y});
+        } // i have to promise myself il never do it like this again so dump but ey works
+        try writer.print(",", .{});
+        //data.?.sub_board += 1;
+
+        var z: usize = 0;
+        while (z < 9) : (z += 1) {
+            if (z == data.?.sub_board) {
+                try writer.print("{d}", .{1});
+
+                continue; // this is for subbaord
+            }
+
+            try writer.print("{d}", .{0});
+        }
+
+        try writer.print(",", .{});
+
+        try writer.print("{d},{d}\n", .{ data.?.turn, data.?.estimate });
 
         write_count += 1;
         if (write_count % flush_interval == 0) {
