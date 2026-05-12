@@ -24,7 +24,7 @@ const Move = extern struct {
 
 var is_first_time: bool = true;
 
-const threads_amount: usize = 8; // with main thread :]]
+const threads_amount: usize = 1; // with main thread :]]
 
 export fn libmcts_bot(boardstate: *const RawBoardstate, _: *i32) Move {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -133,12 +133,12 @@ fn sim(root_node: *Node, boardstate: RawBoardstate, allocator: std.mem.Allocator
     var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.milliTimestamp())));
     const rand = prng.random();
 
-    // var local_arenas = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    //var local_arenas = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     //
     // const local_allocator = local_arenas.allocator();
 
-    //const start = std.time.milliTimestamp();
-    while (root_node.visits < 1000000) { //(std.time.milliTimestamp() - start < 500) {
+    const start = std.time.milliTimestamp();
+    while (std.time.milliTimestamp() - start < 2700) {
         mcts.selection(root_node, allocator, rand, boardstate.current) catch unreachable;
     }
 }
@@ -299,7 +299,7 @@ fn createDataSet() !void {
 
     var wg: std.Thread.WaitGroup = .{};
     var x: usize = 0;
-    while (x < threads_amount - 1) : (x += 1) {
+    while (x < threads_amount) : (x += 1) {
         std.Thread.sleep(200 * std.time.ns_per_ms); // or my random vals get fucked
         pool.spawnWg(&wg, createRandomBoard, .{&dataList});
         std.debug.print("0\n", .{});
@@ -357,11 +357,11 @@ fn createDataSet() !void {
             try writer.print("{d}", .{y});
         } // i have to promise myself il never do it like this again so dump but ey works
         try writer.print(",", .{});
-        //data.?.sub_board += 1;
+        const tem = data.?.sub_board + 1;
 
         var z: usize = 0;
-        while (z < 9) : (z += 1) {
-            if (z == data.?.sub_board) {
+        while (z < 10) : (z += 1) {
+            if (z == tem) {
                 try writer.print("{d}", .{1});
 
                 continue; // this is for subbaord
